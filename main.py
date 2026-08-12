@@ -1,26 +1,19 @@
-import os
-import requests
-import urllib3
-from dotenv import load_dotenv
+from database.init_db import initialize_database
+from core.bot import LifeCheckBot
 
-# Отключаем предупреждение (только для проверки!)
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-load_dotenv()
+def main():
 
-TOKEN = os.getenv("BOT_TOKEN")
+    print("=" * 50)
+    print("LifeCheck v0.3.2")
+    print("=" * 50)
 
-url = "https://platform-api2.max.ru/me"
+    initialize_database()
 
-headers = {
-    "Authorization": TOKEN
-}
+    bot = LifeCheckBot()
 
-response = requests.get(
-    url,
-    headers=headers,
-    verify=False
-)
+    bot.run()
 
-print("Статус:", response.status_code)
-print(response.text)
+
+if __name__ == "__main__":
+    main()
