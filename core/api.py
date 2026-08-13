@@ -4,6 +4,7 @@ import urllib3
 from config.settings import BOT_TOKEN
 
 
+# Отключаем предупреждения о verify=False
 urllib3.disable_warnings(
     urllib3.exceptions.InsecureRequestWarning
 )
@@ -14,6 +15,12 @@ class MaxAPI:
     BASE_URL = "https://platform-api2.max.ru"
 
     def __init__(self):
+
+        # Создаем отдельную HTTP-сессию
+        self.session = requests.Session()
+
+        # Не использовать системные HTTP_PROXY / HTTPS_PROXY
+        self.session.trust_env = False
 
         self.headers = {
             "Authorization": BOT_TOKEN,
@@ -26,10 +33,11 @@ class MaxAPI:
 
     def get_me(self):
 
-        return requests.get(
+        return self.session.get(
             f"{self.BASE_URL}/me",
             headers=self.headers,
-            verify=False
+            verify=False,
+            timeout=15
         )
 
     # ==================================================
@@ -49,17 +57,15 @@ class MaxAPI:
         }
 
         if marker is not None:
-
             params["marker"] = marker
 
-        response = requests.get(
+        return self.session.get(
             f"{self.BASE_URL}/updates",
             headers=self.headers,
             params=params,
-            verify=False
+            verify=False,
+            timeout=timeout + 10
         )
-
-        return response
 
     # ==================================================
     # Отправка сообщения
@@ -75,11 +81,9 @@ class MaxAPI:
         params = {}
 
         if user_id is not None:
-
             params["user_id"] = user_id
 
         if chat_id is not None:
-
             params["chat_id"] = chat_id
 
         body = {
@@ -87,10 +91,11 @@ class MaxAPI:
             "format": "html"
         }
 
-        return requests.post(
+        return self.session.post(
             f"{self.BASE_URL}/messages",
             headers=self.headers,
             params=params,
             json=body,
-            verify=False
+            verify=False,
+            timeout=15
         )

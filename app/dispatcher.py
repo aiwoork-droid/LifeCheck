@@ -58,10 +58,6 @@ class Dispatcher:
 
         elif screen == "health":
 
-            # --------------------------------------
-            # Назад
-            # --------------------------------------
-
             if text == "0":
 
                 users.set_screen(
@@ -78,10 +74,6 @@ class Dispatcher:
                 )
 
                 return
-
-            # --------------------------------------
-            # Давление
-            # --------------------------------------
 
             if text == "1":
 
@@ -102,10 +94,6 @@ class Dispatcher:
                 )
 
                 return
-
-            # --------------------------------------
-            # Мигрень
-            # --------------------------------------
 
             if text == "2":
 
@@ -146,10 +134,6 @@ class Dispatcher:
 
         elif screen == "health_pressure":
 
-            # --------------------------------------
-            # Назад
-            # --------------------------------------
-
             if text == "0":
 
                 users.set_screen(
@@ -169,10 +153,6 @@ class Dispatcher:
 
                 return
 
-            # --------------------------------------
-            # Новое измерение
-            # --------------------------------------
-
             if text == "1":
 
                 users.set_screen(
@@ -191,10 +171,6 @@ class Dispatcher:
                 )
 
                 return
-
-            # --------------------------------------
-            # Сегодня
-            # --------------------------------------
 
             if text == "2":
 
@@ -241,10 +217,6 @@ class Dispatcher:
                 )
 
                 return
-
-            # --------------------------------------
-            # Удалить последнее
-            # --------------------------------------
 
             if text == "3":
 
@@ -351,7 +323,6 @@ class Dispatcher:
                 "blood_pressure_diastolic"
             )
 
-            # временно сохраняем значение
             users.set_temp_value(
                 user_id,
                 "blood_pressure_systolic",
@@ -440,9 +411,7 @@ class Dispatcher:
 
                 api.send_message(
                     chat_id=chat_id,
-                    text=(
-                        "Начните измерение заново."
-                    )
+                    text="Начните измерение заново."
                 )
 
                 return
@@ -544,9 +513,7 @@ class Dispatcher:
 
                 api.send_message(
                     chat_id=chat_id,
-                    text=(
-                        "Начните измерение заново."
-                    )
+                    text="Начните измерение заново."
                 )
 
                 return
@@ -580,10 +547,15 @@ class Dispatcher:
             return
 
         # ==========================================
-        # Сегодня
+        # Сегодня + состояния раздела «Сегодня»
         # ==========================================
 
-        elif screen == "today":
+        elif screen in (
+            "today",
+            "toilet_type",
+            "toilet_amount",
+            "toilet_time"
+        ):
 
             today_handler.handle(
                 api,
@@ -916,6 +888,27 @@ class Dispatcher:
                 )
 
                 return
+
+        # ==========================================
+        # Неизвестный экран
+        # ==========================================
+
+        print(
+            f"WARNING: неизвестный screen='{screen}'"
+        )
+
+        users.set_screen(
+            user_id,
+            "menu"
+        )
+
+        from app.commands import menu
+
+        menu.execute(
+            api,
+            chat_id,
+            first_name
+        )
 
 
 dispatcher = Dispatcher()
