@@ -1,114 +1,3 @@
-work_logs = WorkLogRepository()root@lucy:/opt/LifeCheck# grep -n -A80 -B10 "Работа" app/handlers/today_handler.py                 grep -n -A80 -B10 "Работа" app/handlers/today_handler.py
-root@lucy:/opt/LifeCheck# grep -n -i -E "work_logs|start_work|finish_work|work_started|work_finished" app/handlers/today_handler.py
-10:from database.repositories.work_logs import work_logs
-295:        work_logs.start_work(
-313:        work_logs.finish_work(
-root@lucy:/opt/LifeCheck# grep -n -i -E "work_logs|start_work|finish_work" app/commands/today.py
-6:from database.repositories.work_logs import work_logs
-179:    work_info = work_logs.get_today_info(
-root@lucy:/opt/LifeCheck# sed -n '270,330p' app/handlers/today_handler.py
-
-    # ==================================================
-    # СОН — ПРОБУЖДЕНИЕ
-    # ==================================================
-
-    if text.lower() == "пробуждение":
-
-        sleep_logs.wake_up(
-            user_id
-        )
-
-        today.execute(
-            api,
-            chat_id,
-            user_id
-        )
-
-        return
-
-    # ==================================================
-    # РАБОТА — НАЧАТЬ
-    # ==================================================
-
-    if text.lower() == "работа+":
-
-        work_logs.start_work(
-            user_id
-        )
-
-        today.execute(
-            api,
-            chat_id,
-            user_id
-        )
-
-        return
-
-    # ==================================================
-    # РАБОТА — ЗАКОНЧИТЬ
-    # ==================================================
-
-    if text.lower() == "работа-":
-
-        work_logs.finish_work(
-            user_id
-        )
-
-        today.execute(
-            api,
-            chat_id,
-            user_id
-        )
-
-        return
-
-    # ==================================================
-    # МИГРЕНЬ — ОТМЕТИТЬ
-    # ==================================================
-
-    if text.lower() == "м+":
-
-root@lucy:/opt/LifeCheck# sed -n '160,195p' app/commands/today.py
-        )
-    )
-
-    # =================================================
-    # СОН
-    # =================================================
-
-    sleep_info = sleep_logs.get_today_info(
-        user_id
-    )
-
-    sleep_started = sleep_info["started"]
-    sleep_wake_up = sleep_info["wake_up"]
-    sleep_duration = sleep_info["duration"]
-
-    # =================================================
-    # РАБОТА
-    # =================================================
-
-    work_info = work_logs.get_today_info(
-        user_id
-    )
-
-    work_started = work_info["started"]
-    work_finished = work_info["finished"]
-    work_duration = work_info["duration"]
-
-    # =================================================
-    # МИГРЕНЬ
-    # =================================================
-
-    migraine_info = migraine_logs.get_today_info(
-        user_id
-    )
-
-    migraine_exists = migraine_info["exists"]
-root@lucy:/opt/LifeCheck# notepad app\handlers\today_handler.py
-notepad: command not found
-root@lucy:/opt/LifeCheck# cd /opt/LifeCheck
-cat app/handlers/today_handler.py
 from app.commands import today
 from app.commands import menu
 
@@ -401,7 +290,7 @@ def handle(
     # РАБОТА — НАЧАТЬ
     # ==================================================
 
-    if text.lower() == "работа+":
+    if text.lower() == "работа":
 
         work_logs.start_work(
             user_id
@@ -419,7 +308,7 @@ def handle(
     # РАБОТА — ЗАКОНЧИТЬ
     # ==================================================
 
-    if text.lower() == "работа-":
+    if text.lower() == "закончить работу":
 
         work_logs.finish_work(
             user_id
@@ -520,10 +409,10 @@ def handle(
             "т- — убрать последнее посещение\n"
             "сон — начать сон\n"
             "пробуждение — проснуться\n"
-            "работа+ — начать работу\n"
-            "работа- — закончить работу\n"
+            "работа — начать работу\n"
+            "закончить работу — закончить работу\n"
             "м+ — отметить мигрень\n"
             "мигрень- — убрать мигрень\n"
             "0 — назад"
         )
-    )root@lucy:/opt/LifeCheck# 
+    )
