@@ -532,7 +532,7 @@ def execute(api, chat_id, user_id):
 
         text += (
             "Сегодня: <b>нет</b>\n\n"
-            "мигрень+ — отметить\n"
+            "м+ — отметить\n"
         )
 
     text += "\n"
