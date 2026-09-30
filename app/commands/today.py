@@ -6,6 +6,7 @@ from database.repositories.sleep_logs import sleep_logs
 from database.repositories.work_logs import work_logs
 from database.repositories.migraine_logs import migraine_logs
 from database.repositories.blood_pressure_logs import blood_pressure_logs
+from database.repositories.blood_sugar_logs import blood_sugar_logs
 
 
 def get_icon(title):
@@ -213,6 +214,22 @@ def execute(api, chat_id, user_id):
     )
 
     # =================================================
+    # САХАР
+    # =================================================
+
+    blood_sugar_measurements = (
+        blood_sugar_logs.get_today_measurements(
+            user_id
+        )
+    )
+
+    blood_sugar_count = (
+        blood_sugar_logs.get_today_count(
+            user_id
+        )
+    )
+
+    # =================================================
     # Заголовок
     # =================================================
 
@@ -398,6 +415,62 @@ def execute(api, chat_id, user_id):
     text += (
         "\n"
         "4 → Здоровье → 1 — новое измерение\n\n"
+    )
+
+    text += (
+        "━━━━━━━━━━━━━━\n\n"
+    )
+
+    # =================================================
+    # САХАР
+    # =================================================
+
+    text += (
+        "🩸 <b>Сахар</b>\n\n"
+    )
+
+    if blood_sugar_count == 0:
+
+        text += (
+            "Сегодня измерений нет.\n"
+        )
+
+    else:
+
+        text += (
+            f"Измерений сегодня: "
+            f"<b>{blood_sugar_count}</b>\n\n"
+        )
+
+        for measurement in blood_sugar_measurements:
+
+            measurement_time = (
+                measurement.get("time")
+            )
+
+            value = measurement.get("value")
+
+            meal_label = measurement.get(
+                "meal_label"
+            )
+
+            if not measurement_time:
+
+                measurement_time = "--:--"
+
+            if meal_label is None:
+
+                meal_label = "—"
+
+            text += (
+                f"🕐 {measurement_time} — "
+                f"<b>{value}</b> ммоль/л "
+                f"({meal_label})\n"
+            )
+
+    text += (
+        "\n"
+        "4 → Здоровье → 3 — сахар\n\n"
     )
 
     text += (
