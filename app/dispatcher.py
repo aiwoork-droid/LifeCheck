@@ -5,6 +5,7 @@ from app.handlers import today_handler
 
 from database.repositories.users import users
 from database.repositories.blood_pressure_logs import blood_pressure_logs
+from database.repositories.blood_sugar_logs import blood_sugar_logs
 
 
 class Dispatcher:
@@ -116,12 +117,33 @@ class Dispatcher:
 
                 return
 
+            if text == "3":
+
+                users.set_screen(
+                    user_id,
+                    "health_sugar"
+                )
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "🩸 <b>Сахар в крови</b>\n\n"
+                        "1 — Новое измерение\n"
+                        "2 — Сегодня\n"
+                        "3 — Удалить последнее\n\n"
+                        "0 — назад"
+                    )
+                )
+
+                return
+
             api.send_message(
                 chat_id=chat_id,
                 text=(
                     "❤️ <b>Здоровье</b>\n\n"
                     "1 — 🩺 Давление\n"
-                    "2 — 🧠 Мигрень\n\n"
+                    "2 — 🧠 Мигрень\n"
+                    "3 — 🩸 Сахар\n\n"
                     "0 — назад"
                 )
             )
@@ -570,6 +592,321 @@ class Dispatcher:
         # ==========================================
         # Мигрень
         # ==========================================
+
+
+        # ==========================================
+        # Раздел сахара
+        # ==========================================
+
+        elif screen == "health_sugar":
+
+            if text == "0":
+
+                users.set_screen(
+                    user_id,
+                    "health"
+                )
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "❤️ <b>Здоровье</b>\n\n"
+                        "1 — 🩺 Давление\n"
+                        "2 — 🧠 Мигрень\n"
+                        "3 — 🩸 Сахар\n\n"
+                        "0 — назад"
+                    )
+                )
+
+                return
+
+            if text == "1":
+
+                users.set_screen(
+                    user_id,
+                    "blood_sugar_meal"
+                )
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "🩸 <b>Когда измеряли?</b>\n\n"
+                        "1 — До еды\n"
+                        "2 — После еды\n"
+                        "3 — Между приёмами (≈2 часа)\n\n"
+                        "0 — отмена"
+                    )
+                )
+
+                return
+
+            if text == "2":
+
+                measurements = (
+                    blood_sugar_logs
+                    .get_today_measurements(
+                        user_id
+                    )
+                )
+
+                if not measurements:
+
+                    result = (
+                        "🩸 <b>Сахар сегодня</b>\n\n"
+                        "Измерений пока нет."
+                    )
+
+                else:
+
+                    result = (
+                        "🩸 <b>Сахар сегодня</b>\n\n"
+                    )
+
+                    for m in measurements:
+
+                        time_text = m["time"] or "--:--"
+                        value = m["value"]
+                        label = m["meal_label"]
+
+                        result += (
+                            f"{time_text} — "
+                            f"<b>{value}</b> ммоль/л\n"
+                            f"({label})\n\n"
+                        )
+
+                result += "\n0 — назад"
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=result
+                )
+
+                return
+
+            if text == "3":
+
+                ok = blood_sugar_logs.remove_last_measurement(
+                    user_id
+                )
+
+                if ok:
+                    msg = "🩸 Последнее измерение удалено."
+                else:
+                    msg = "🩸 Нечего удалять — записей сегодня нет."
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=msg
+                )
+
+                return
+
+            api.send_message(
+                chat_id=chat_id,
+                text=(
+                    "🩸 <b>Сахар в крови</b>\n\n"
+                    "1 — Новое измерение\n"
+                    "2 — Сегодня\n"
+                    "3 — Удалить последнее\n\n"
+                    "0 — назад"
+                )
+            )
+
+            return
+
+        elif screen == "blood_sugar_meal":
+
+            if text == "0":
+
+                users.set_screen(
+                    user_id,
+                    "health_sugar"
+                )
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "🩸 <b>Сахар в крови</b>\n\n"
+                        "1 — Новое измерение\n"
+                        "2 — Сегодня\n"
+                        "3 — Удалить последнее\n\n"
+                        "0 — назад"
+                    )
+                )
+
+                return
+
+            meal_map = {
+                "1": "before",
+                "2": "after",
+                "3": "between"
+            }
+
+            meal = meal_map.get(text)
+
+            if meal is None:
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "🩸 <b>Когда измеряли?</b>\n\n"
+                        "1 — До еды\n"
+                        "2 — После еды\n"
+                        "3 — Между приёмами (≈2 часа)\n\n"
+                        "0 — отмена"
+                    )
+                )
+
+                return
+
+            users.set_temp_value(
+                user_id,
+                "blood_sugar_meal",
+                meal
+            )
+
+            users.set_screen(
+                user_id,
+                "blood_sugar_value"
+            )
+
+            api.send_message(
+                chat_id=chat_id,
+                text=(
+                    "🩸 Введите уровень сахара.\n\n"
+                    "Например: <b>5.6</b> или <b>5,6</b>\n"
+                    "(ммоль/л)\n\n"
+                    "0 — отмена"
+                )
+            )
+
+            return
+
+        elif screen == "blood_sugar_value":
+
+            if text == "0":
+
+                users.set_screen(
+                    user_id,
+                    "health_sugar"
+                )
+
+                users.delete_temp_value(
+                    user_id,
+                    "blood_sugar_meal"
+                )
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "🩸 <b>Сахар в крови</b>\n\n"
+                        "1 — Новое измерение\n"
+                        "2 — Сегодня\n"
+                        "3 — Удалить последнее\n\n"
+                        "0 — назад"
+                    )
+                )
+
+                return
+
+            meal = users.get_temp_value(
+                user_id,
+                "blood_sugar_meal"
+            )
+
+            if not meal:
+
+                users.set_screen(
+                    user_id,
+                    "blood_sugar_meal"
+                )
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "🩸 Сначала укажите, когда измеряли.\n\n"
+                        "1 — До еды\n"
+                        "2 — После еды\n"
+                        "3 — Между приёмами (≈2 часа)\n\n"
+                        "0 — отмена"
+                    )
+                )
+
+                return
+
+            raw = text.replace(",", ".").strip()
+
+            try:
+                value = float(raw)
+            except ValueError:
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "Введите число.\n"
+                        "Например: <b>5.6</b>"
+                    )
+                )
+
+                return
+
+            if value < 1.0 or value > 40.0:
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "Значение выглядит необычно.\n\n"
+                        "Введите сахар от <b>1.0</b> "
+                        "до <b>40.0</b> ммоль/л."
+                    )
+                )
+
+                return
+
+            ok = blood_sugar_logs.add_measurement(
+                user_id,
+                value,
+                meal
+            )
+
+            users.delete_temp_value(
+                user_id,
+                "blood_sugar_meal"
+            )
+
+            users.set_screen(
+                user_id,
+                "health_sugar"
+            )
+
+            if ok:
+
+                label = blood_sugar_logs.MEAL_LABELS.get(
+                    meal,
+                    meal
+                )
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "🩸 Сохранено:\n"
+                        f"<b>{value}</b> ммоль/л\n"
+                        f"({label})\n\n"
+                        "1 — ещё измерение\n"
+                        "2 — сегодня\n"
+                        "0 — назад"
+                    )
+                )
+
+            else:
+
+                api.send_message(
+                    chat_id=chat_id,
+                    text="Не удалось сохранить. Попробуйте снова."
+                )
+
+            return
+
 
         elif screen == "migraine_intensity":
 

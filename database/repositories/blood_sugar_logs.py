@@ -26,8 +26,10 @@ class BloodSugarLogRepository:
             (user_id, date.today().isoformat())
         )
         row = self.db.cursor.fetchone()
+
         if row is None:
             return 0
+
         return int(row[0] or 0)
 
     def get_today_measurements(self, user_id):
@@ -46,17 +48,25 @@ class BloodSugarLogRepository:
             """,
             (user_id, date.today().isoformat())
         )
+
         rows = self.db.cursor.fetchall()
+
         result = []
+
         for row in rows:
+
             time_text = None
+
             if row[3]:
+
                 try:
                     time_text = datetime.fromisoformat(
                         row[3]
                     ).strftime("%H:%M")
+
                 except Exception:
                     time_text = None
+
             result.append({
                 "id": row[0],
                 "value": row[1],
@@ -67,6 +77,7 @@ class BloodSugarLogRepository:
                 ),
                 "time": time_text
             })
+
         return result
 
     def add_measurement(
@@ -76,11 +87,15 @@ class BloodSugarLogRepository:
         meal_context,
         at=None
     ):
+
         if meal_context not in self.MEAL_LABELS:
             return False
 
         try:
-            value = float(str(value).replace(",", "."))
+            value = float(
+                str(value).replace(",", ".")
+            )
+
         except (TypeError, ValueError):
             return False
 
@@ -110,10 +125,13 @@ class BloodSugarLogRepository:
                 at.isoformat(timespec="seconds")
             )
         )
+
         self.db.connection.commit()
+
         return True
 
     def remove_last_measurement(self, user_id):
+
         self.db.cursor.execute(
             """
             SELECT id
@@ -124,9 +142,14 @@ class BloodSugarLogRepository:
             ORDER BY id DESC
             LIMIT 1
             """,
-            (user_id, date.today().isoformat())
+            (
+                user_id,
+                date.today().isoformat()
+            )
         )
+
         row = self.db.cursor.fetchone()
+
         if row is None:
             return False
 
@@ -134,7 +157,9 @@ class BloodSugarLogRepository:
             "DELETE FROM blood_sugar_logs WHERE id = ?",
             (row[0],)
         )
+
         self.db.connection.commit()
+
         return True
 
 
