@@ -138,10 +138,36 @@ def get_toilet(user_id, start_date, end_date):
 
 
 # ==================================================
+# ДЛИТЕЛЬНОСТЬ
+# ==================================================
+
+def calc_duration(started_iso, end_iso):
+    if not started_iso or not end_iso:
+        return None
+    try:
+        t1 = datetime.fromisoformat(started_iso)
+        t2 = datetime.fromisoformat(end_iso)
+        total_minutes = int((t2 - t1).total_seconds() / 60)
+        if total_minutes < 0:
+            return None
+        hours = total_minutes // 60
+        minutes = total_minutes % 60
+        return f"{hours} ч {minutes} мин"
+    except Exception:
+        return None
+
+
+# ==================================================
 # СОН
 # ==================================================
 
 def get_sleep(user_id, start_date, end_date):
+
+    # Для одного дня берём ещё и вчера
+    # (лёг вечером — проснулся утром)
+    query_start = start_date
+    if start_date == end_date:
+        query_start = start_date - timedelta(days=1)
 
     db.cursor.execute(
         """
@@ -153,11 +179,11 @@ def get_sleep(user_id, start_date, end_date):
         WHERE
             user_id = ?
             AND sleep_date BETWEEN ? AND ?
-        ORDER BY sleep_date
+        ORDER BY sleep_date, id
         """,
         (
             user_id,
-            start_date.isoformat(),
+            query_start.isoformat(),
             end_date.isoformat()
         )
     )
@@ -166,9 +192,28 @@ def get_sleep(user_id, start_date, end_date):
 
     for sleep_date, started, wake_up in db.cursor.fetchall():
 
-        result[sleep_date] = {
+        key = sleep_date
+
+        # Вчерашний сон, который закончился сегодня —
+        # показываем в сегодняшнем отчёте
+        if start_date == end_date and sleep_date != end_date.isoformat():
+            if wake_up:
+                try:
+                    wake_dt = datetime.fromisoformat(wake_up)
+                    if wake_dt.date() == end_date:
+                        key = end_date.isoformat()
+                    else:
+                        continue
+                except Exception:
+                    continue
+            else:
+                # незакрытый вчерашний — тоже показываем сегодня
+                key = end_date.isoformat()
+
+        result[key] = {
             "started": format_time(started),
-            "wake_up": format_time(wake_up)
+            "wake_up": format_time(wake_up),
+            "duration": calc_duration(started, wake_up)
         }
 
     return result
@@ -190,7 +235,7 @@ def get_work(user_id, start_date, end_date):
         WHERE
             user_id = ?
             AND work_date BETWEEN ? AND ?
-        ORDER BY work_date
+        ORDER BY work_date, id
         """,
         (
             user_id,
@@ -205,7 +250,8 @@ def get_work(user_id, start_date, end_date):
 
         result[work_date] = {
             "started": format_time(started),
-            "finished": format_time(finished)
+            "finished": format_time(finished),
+            "duration": calc_duration(started, finished)
         }
 
     return result
@@ -352,6 +398,57 @@ def get_blood_pressure(user_id, start_date, end_date):
 # ФОРМАТИРОВАНИЕ ДАВЛЕНИЯ
 # ==================================================
 
+
+def get_blood_sugar(user_id, start_date, end_date):
+
+    db.cursor.execute(
+        """
+        SELECT
+            log_date,
+            value,
+            meal_context,
+            created_at
+        FROM blood_sugar_logs
+        WHERE
+            user_id = ?
+            AND log_date BETWEEN ? AND ?
+        ORDER BY log_date, id
+        """,
+        (
+            user_id,
+            start_date.isoformat(),
+            end_date.isoformat()
+        )
+    )
+
+    meal_labels = {
+        "before": "до еды",
+        "after": "после еды",
+        "between": "между приёмами (2 ч)"
+    }
+
+    result = {}
+
+    for log_date, value, meal_context, created_at in db.cursor.fetchall():
+
+        if log_date not in result:
+            result[log_date] = []
+
+        result[log_date].append(
+            {
+                "value": value,
+                "meal_context": meal_context,
+                "meal_label": meal_labels.get(
+                    meal_context,
+                    meal_context or "—"
+                ),
+                "time": format_time(created_at)
+            }
+        )
+
+    return result
+
+
 def format_pressure(measurement):
 
     time_text = (
@@ -423,6 +520,12 @@ def build_day_report(
     )
 
     blood_pressure = get_blood_pressure(
+        user_id,
+        target_date,
+        target_date
+    )
+
+    blood_sugar = get_blood_sugar(
         user_id,
         target_date,
         target_date
@@ -525,6 +628,43 @@ def build_day_report(
         text += "\n"
 
     # ==================================================
+    # САХАР
+    # ==================================================
+
+    text += "🩸 <b>Сахар</b>\n"
+
+    sugar_measurements = blood_sugar.get(
+        key,
+        []
+    )
+
+    if not sugar_measurements:
+
+        text += (
+            "Нет измерений\n\n"
+        )
+
+    else:
+
+        for measurement in sugar_measurements:
+
+            time_text = (
+                measurement["time"]
+                or "--:--"
+            )
+
+            value = measurement["value"]
+            label = measurement["meal_label"]
+
+            text += (
+                f"{time_text} — "
+                f"<b>{value}</b> ммоль/л "
+                f"({label})\n"
+            )
+
+        text += "\n"
+
+    # ==================================================
     # МИГРЕНЬ
     # ==================================================
 
@@ -546,30 +686,60 @@ def build_day_report(
         text += "Нет\n\n"
 
     # ==================================================
+    # САХАР
+    # ==================================================
+
+    text += "🩸 <b>Сахар</b>\n"
+
+    sugar_count = 0
+
+    current = first_day
+
+    while current <= last_day:
+
+        key = current.isoformat()
+        measurements = blood_sugar.get(key, [])
+
+        if measurements:
+            text += f"\n<b>{current.strftime('%d.%m')}</b>\n"
+
+            for measurement in measurements:
+                time_text = measurement["time"] or "--:--"
+                text += (
+                    f"{time_text} — "
+                    f"<b>{measurement['value']}</b> ммоль/л "
+                    f"({measurement['meal_label']})\n"
+                )
+                sugar_count += 1
+
+        current += timedelta(days=1)
+
+    if sugar_count == 0:
+        text += "Нет измерений\n"
+    else:
+        text += f"\nВсего измерений: <b>{sugar_count}</b>\n"
+
+    text += "\n"
+
+    # ==================================================
     # СОН
     # ==================================================
 
     text += "😴 <b>Сон</b>\n"
 
-    sleep_info = sleep.get(
-        key
-    )
+    sleep_info = sleep.get(key)
 
     if sleep_info:
 
-        started = (
-            sleep_info["started"]
-            or "--:--"
-        )
+        started = sleep_info["started"] or "--:--"
+        wake_up = sleep_info["wake_up"] or "--:--"
+        duration = sleep_info.get("duration")
 
-        wake_up = (
-            sleep_info["wake_up"]
-            or "--:--"
-        )
+        line = f"{started} — {wake_up}"
+        if duration:
+            line += f" ({duration})"
 
-        text += (
-            f"{started} — {wake_up}\n\n"
-        )
+        text += line + "\n\n"
 
     else:
 
@@ -581,25 +751,19 @@ def build_day_report(
 
     text += "💼 <b>Работа</b>\n"
 
-    work_info = work.get(
-        key
-    )
+    work_info = work.get(key)
 
     if work_info:
 
-        started = (
-            work_info["started"]
-            or "--:--"
-        )
+        started = work_info["started"] or "--:--"
+        finished = work_info["finished"] or "--:--"
+        duration = work_info.get("duration")
 
-        finished = (
-            work_info["finished"]
-            or "--:--"
-        )
+        line = f"{started} — {finished}"
+        if duration:
+            line += f" ({duration})"
 
-        text += (
-            f"{started} — {finished}\n\n"
-        )
+        text += line + "\n\n"
 
     else:
 
@@ -683,6 +847,25 @@ def build_week_report(
         monday,
         sunday
     )
+
+    sleep = get_sleep(
+        user_id,
+        monday,
+        sunday
+    )
+
+    work = get_work(
+        user_id,
+        monday,
+        sunday
+    )
+
+    blood_sugar = get_blood_sugar(
+        user_id,
+        monday,
+        sunday
+    )
+
 
     text = (
         f"📊 <b>Неделя</b>\n"
@@ -829,6 +1012,109 @@ def build_week_report(
     text += "\n"
 
     # ==================================================
+    # СОН
+    # ==================================================
+
+    text += "😴 <b>Сон</b>\n"
+
+    for i in range(7):
+
+        current = monday + timedelta(
+            days=i
+        )
+
+        key = current.isoformat()
+
+        info = sleep.get(key)
+
+        if info:
+
+            started = info["started"] or "--:--"
+            wake_up = info["wake_up"] or "--:--"
+            duration = info.get("duration")
+
+            line = f"{WEEKDAYS[i]} — {started} — {wake_up}"
+            if duration:
+                line += f" ({duration})"
+
+            text += line + "\n"
+
+        else:
+
+            text += (
+                f"{WEEKDAYS[i]} — нет\n"
+            )
+
+    text += "\n"
+
+    # ==================================================
+    # РАБОТА
+    # ==================================================
+
+    text += "💼 <b>Работа</b>\n"
+
+    for i in range(7):
+
+        current = monday + timedelta(
+            days=i
+        )
+
+        key = current.isoformat()
+
+        info = work.get(key)
+
+        if info:
+
+            started = info["started"] or "--:--"
+            finished = info["finished"] or "--:--"
+            duration = info.get("duration")
+
+            line = f"{WEEKDAYS[i]} — {started} — {finished}"
+            if duration:
+                line += f" ({duration})"
+
+            text += line + "\n"
+
+        else:
+
+            text += (
+                f"{WEEKDAYS[i]} — нет\n"
+            )
+
+    text += "\n"
+
+    # ==================================================
+    # САХАР
+    # ==================================================
+
+    text += "🩸 <b>Сахар</b>\n"
+
+    for i in range(7):
+
+        current = monday + timedelta(
+            days=i
+        )
+
+        key = current.isoformat()
+        items = blood_sugar.get(key, [])
+
+        text += f"\n<b>{WEEKDAYS[i]}</b>\n"
+
+        if not items:
+            text += "нет\n"
+            continue
+
+        for m in items:
+            time_text = m["time"] or "--:--"
+            text += (
+                f"{time_text} — "
+                f"<b>{m['value']}</b> "
+                f"({m['meal_label']})\n"
+            )
+
+    text += "\n"
+
+    # ==================================================
     # МИГРЕНЬ
     # ==================================================
 
@@ -905,6 +1191,24 @@ def build_month_report(
     )
 
     blood_pressure = get_blood_pressure(
+        user_id,
+        first_day,
+        last_day
+    )
+
+    sleep = get_sleep(
+        user_id,
+        first_day,
+        last_day
+    )
+
+    work = get_work(
+        user_id,
+        first_day,
+        last_day
+    )
+
+    blood_sugar = get_blood_sugar(
         user_id,
         first_day,
         last_day
@@ -1054,6 +1358,62 @@ def build_month_report(
             f"<b>{pressure_count}</b>\n"
         )
 
+    # ==================================================
+    # СОН
+    # ==================================================
+
+    text += "😴 <b>Сон</b>\n"
+
+    current = first_day
+
+    while current <= last_day:
+
+        key = current.isoformat()
+        info = sleep.get(key)
+
+        if info:
+            started = info["started"] or "--:--"
+            wake_up = info["wake_up"] or "--:--"
+            duration = info.get("duration")
+            line = f"{current.day:02d} — {started} — {wake_up}"
+            if duration:
+                line += f" ({duration})"
+            text += line + "\n"
+        else:
+            text += f"{current.day:02d} — нет\n"
+
+        current += timedelta(days=1)
+
+    text += "\n"
+
+    # ==================================================
+    # РАБОТА
+    # ==================================================
+
+    text += "💼 <b>Работа</b>\n"
+
+    current = first_day
+
+    while current <= last_day:
+
+        key = current.isoformat()
+        info = work.get(key)
+
+        if info:
+            started = info["started"] or "--:--"
+            finished = info["finished"] or "--:--"
+            duration = info.get("duration")
+            line = f"{current.day:02d} — {started} — {finished}"
+            if duration:
+                line += f" ({duration})"
+            text += line + "\n"
+        else:
+            text += f"{current.day:02d} — нет\n"
+
+        current += timedelta(days=1)
+
+    text += "\n"
+
     return text
 
 
@@ -1091,6 +1451,24 @@ def build_year_report(
     )
 
     blood_pressure = get_blood_pressure(
+        user_id,
+        first_day,
+        last_day
+    )
+
+    sleep = get_sleep(
+        user_id,
+        first_day,
+        last_day
+    )
+
+    work = get_work(
+        user_id,
+        first_day,
+        last_day
+    )
+
+    blood_sugar = get_blood_sugar(
         user_id,
         first_day,
         last_day
@@ -1298,5 +1676,149 @@ def build_year_report(
             )
 
         text += "\n"
+
+    # ==================================================
+    # САХАР
+    # ==================================================
+
+    text += "🩸 <b>Сахар</b>\n"
+
+    year_sugar_count = 0
+
+    for month in range(1, 13):
+
+        days_in_month = calendar.monthrange(
+            target_date.year,
+            month
+        )[1]
+
+        month_measurements = []
+
+        for day_number in range(1, days_in_month + 1):
+            current = date(
+                target_date.year,
+                month,
+                day_number
+            )
+            month_measurements.extend(
+                blood_sugar.get(current.isoformat(), [])
+            )
+
+        year_sugar_count += len(month_measurements)
+
+        if not month_measurements:
+            text += f"{MONTHS[month - 1]} — нет измерений\n"
+            continue
+
+        text += (
+            f"{MONTHS[month - 1]} — "
+            f"<b>{len(month_measurements)}</b> измерений\n"
+        )
+
+    text += (
+        f"\nВсего измерений за год: "
+        f"<b>{year_sugar_count}</b>\n\n"
+    )
+
+    # ==================================================
+    # СОН
+    # ==================================================
+
+    text += "😴 <b>Сон</b>\n"
+
+    for month in range(1, 13):
+
+        days_in_month = calendar.monthrange(
+            target_date.year,
+            month
+        )[1]
+
+        days_with_sleep = 0
+        total_minutes = 0
+
+        for day_number in range(1, days_in_month + 1):
+
+            current = date(
+                target_date.year,
+                month,
+                day_number
+            )
+            info = sleep.get(current.isoformat())
+
+            if info and info.get("started"):
+                days_with_sleep += 1
+                if info.get("duration"):
+                    # parse "X ч Y мин"
+                    try:
+                        parts = info["duration"].replace("ч", " ").replace("мин", " ").split()
+                        h = int(parts[0]) if parts else 0
+                        m = int(parts[1]) if len(parts) > 1 else 0
+                        total_minutes += h * 60 + m
+                    except Exception:
+                        pass
+
+        if days_with_sleep == 0:
+            text += f"{MONTHS[month - 1]} — нет записей\n"
+        else:
+            avg = ""
+            if total_minutes and days_with_sleep:
+                avg_m = total_minutes // days_with_sleep
+                avg = f", среднее {avg_m // 60} ч {avg_m % 60} мин"
+            text += (
+                f"{MONTHS[month - 1]} — "
+                f"<b>{days_with_sleep}</b> ночей{avg}\n"
+            )
+
+    text += "\n"
+
+    # ==================================================
+    # РАБОТА
+    # ==================================================
+
+    text += "💼 <b>Работа</b>\n"
+
+    for month in range(1, 13):
+
+        days_in_month = calendar.monthrange(
+            target_date.year,
+            month
+        )[1]
+
+        days_with_work = 0
+        total_minutes = 0
+
+        for day_number in range(1, days_in_month + 1):
+
+            current = date(
+                target_date.year,
+                month,
+                day_number
+            )
+            info = work.get(current.isoformat())
+
+            if info and info.get("started"):
+                days_with_work += 1
+                if info.get("duration"):
+                    try:
+                        parts = info["duration"].replace("ч", " ").replace("мин", " ").split()
+                        h = int(parts[0]) if parts else 0
+                        m = int(parts[1]) if len(parts) > 1 else 0
+                        total_minutes += h * 60 + m
+                    except Exception:
+                        pass
+
+        if days_with_work == 0:
+            text += f"{MONTHS[month - 1]} — нет записей\n"
+        else:
+            avg = ""
+            if total_minutes and days_with_work:
+                avg_m = total_minutes // days_with_work
+                avg = f", среднее {avg_m // 60} ч {avg_m % 60} мин"
+            text += (
+                f"{MONTHS[month - 1]} — "
+                f"<b>{days_with_work}</b> дней{avg}\n"
+            )
+
+    text += "\n"
 
     return text
