@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 import calendar
 
 from database.db import Database
+from database.repositories.sleep_logs import sleep_logs as sleep_repository
 
 db = Database()
 
@@ -162,13 +163,12 @@ def calc_duration(started_iso, end_iso):
 # ==================================================
 
 def get_sleep(user_id, start_date, end_date):
+    """Return every sleep period grouped by reporting date.
 
-    # Для одного дня берём ещё и вчера
-    # (лёг вечером — проснулся утром)
-    query_start = start_date
-    if start_date == end_date:
-        query_start = start_date - timedelta(days=1)
-
+    A completed sleep period belongs to the date of waking up. An unfinished
+    period belongs to the date it started. This allows day sleep, shift work,
+    periods crossing midnight, and multiple sleep periods per day.
+    """
     db.cursor.execute(
         """
         SELECT
@@ -176,47 +176,82 @@ def get_sleep(user_id, start_date, end_date):
             sleep_started_at,
             wake_up_at
         FROM sleep_logs
-        WHERE
-            user_id = ?
-            AND sleep_date BETWEEN ? AND ?
-        ORDER BY sleep_date, id
+        WHERE user_id = ?
+          AND (
+                (
+                    wake_up_at IS NOT NULL
+                    AND wake_up_at != ''
+                    AND date(wake_up_at) BETWEEN ? AND ?
+                )
+                OR
+                (
+                    (wake_up_at IS NULL OR wake_up_at = '')
+                    AND date(sleep_started_at) BETWEEN ? AND ?
+                )
+          )
+        ORDER BY COALESCE(wake_up_at, sleep_started_at), id
         """,
         (
             user_id,
-            query_start.isoformat(),
-            end_date.isoformat()
-        )
+            start_date.isoformat(),
+            end_date.isoformat(),
+            start_date.isoformat(),
+            end_date.isoformat(),
+        ),
     )
 
     result = {}
-
     for sleep_date, started, wake_up in db.cursor.fetchall():
-
-        key = sleep_date
-
-        # Вчерашний сон, который закончился сегодня —
-        # показываем в сегодняшнем отчёте
-        if start_date == end_date and sleep_date != end_date.isoformat():
+        try:
             if wake_up:
-                try:
-                    wake_dt = datetime.fromisoformat(wake_up)
-                    if wake_dt.date() == end_date:
-                        key = end_date.isoformat()
-                    else:
-                        continue
-                except Exception:
-                    continue
+                report_day = datetime.fromisoformat(wake_up).date()
+            elif started:
+                report_day = datetime.fromisoformat(started).date()
             else:
-                # незакрытый вчерашний — тоже показываем сегодня
-                key = end_date.isoformat()
+                # Malformed legacy row; do not show a phantom sleep event.
+                continue
+        except (TypeError, ValueError):
+            # Keep malformed legacy timestamps out of reports without
+            # blocking reports for the rest of the user's data.
+            continue
 
-        result[key] = {
-            "started": format_time(started),
-            "wake_up": format_time(wake_up),
-            "duration": calc_duration(started, wake_up)
-        }
+        key = report_day.isoformat()
+        result.setdefault(key, []).append(
+            {
+                "started": format_time(started),
+                "wake_up": format_time(wake_up),
+                "started_at": started,
+                "wake_up_at": wake_up,
+                "duration": calc_duration(started, wake_up),
+            }
+        )
 
     return result
+
+
+def format_sleep_entry(info):
+    """Format one sleep period; show dates when it crosses midnight."""
+    started = info.get("started") or "--:--"
+    wake_up = info.get("wake_up") or "--:--"
+
+    started_raw = info.get("started_at")
+    wake_raw = info.get("wake_up_at")
+    try:
+        started_dt = datetime.fromisoformat(started_raw) if started_raw else None
+        wake_dt = datetime.fromisoformat(wake_raw) if wake_raw else None
+    except (TypeError, ValueError):
+        started_dt = wake_dt = None
+
+    if started_dt and wake_dt and started_dt.date() != wake_dt.date():
+        started = started_dt.strftime("%d.%m %H:%M")
+        wake_up = wake_dt.strftime("%d.%m %H:%M")
+
+    line = f"{started} — {wake_up}"
+    if info.get("duration"):
+        line += f" ({info['duration']})"
+    elif started_dt and not wake_dt:
+        line += " (сон ещё не завершён)"
+    return line
 
 
 # ==================================================
@@ -594,15 +629,19 @@ def build_day_report(user_id, target_date):
             [f"{migraine_info['time'] or '--:--'} — {migraine_info['intensity']}/10"]
         ))
 
-    sleep_info = sleep.get(key)
-    if sleep_info and (sleep_info.get("started") or sleep_info.get("wake_up")):
-        started = sleep_info.get("started") or "--:--"
-        wake_up = sleep_info.get("wake_up") or "--:--"
-        duration = sleep_info.get("duration")
-        line = f"{started} — {wake_up}"
-        if duration:
-            line += f" ({duration})"
-        sections.append(section("😴 <b>Сон</b>", [line]))
+    sleep_entries = sleep.get(key, [])
+    if sleep_entries:
+        sections.append(section(
+            "😴 <b>Сон</b>",
+            [format_sleep_entry(info) for info in sleep_entries]
+        ))
+
+    no_sleep_dates = sleep_repository.get_no_sleep_dates(user_id, target_date, target_date)
+    if target_date in no_sleep_dates:
+        sections.append(section(
+            "🌙 <b>Бессонная ночь</b>",
+            ["Отмечено: ночью не спал(а). Эта отметка может сочетаться с дневным сном."]
+        ))
 
     work_info = work.get(key)
     if work_info and (work_info.get("started") or work_info.get("finished")):
@@ -703,19 +742,25 @@ def build_week_report(user_id, target_date):
         lines.append(f"Всего измерений: <b>{count}</b>")
         sections.append(section("🩸 <b>Сахар</b>", lines))
 
-    sleep_dates = [day for day in recorded_dates(sleep)
-                   if sleep[day.isoformat()].get("started") or sleep[day.isoformat()].get("wake_up")]
+    sleep_dates = recorded_dates(sleep)
     if sleep_dates:
         lines = []
+        total_periods = 0
         for day in sleep_dates:
-            info = sleep[day.isoformat()]
-            started = info.get("started") or "--:--"
-            wake_up = info.get("wake_up") or "--:--"
-            line = f"{date_label(day)} — {started} — {wake_up}"
-            if info.get("duration"):
-                line += f" ({info['duration']})"
-            lines.append(line)
-        sections.append(section("😴 <b>Сон</b>", lines))
+            entries = sleep.get(day.isoformat(), [])
+            if not entries:
+                continue
+            for info in entries:
+                lines.append(f"<b>{date_label(day)}</b> — {format_sleep_entry(info)}")
+                total_periods += 1
+        if total_periods:
+            lines.append(f"Всего периодов сна: <b>{total_periods}</b>")
+            sections.append(section("😴 <b>Сон</b>", lines))
+
+    no_sleep_dates = sleep_repository.get_no_sleep_dates(user_id, monday, sunday)
+    if no_sleep_dates:
+        lines = [f"{date_label(day)} — отмечено, что ночью не спал(а)" for day in no_sleep_dates]
+        sections.append(section("🌙 <b>Бессонные ночи</b>", lines))
 
     work_dates = [day for day in recorded_dates(work)
                   if work[day.isoformat()].get("started") or work[day.isoformat()].get("finished")]
@@ -821,17 +866,25 @@ def build_month_report(user_id, target_date):
         lines.append(f"Всего измерений: <b>{count}</b>")
         sections.append(section("🩸 <b>Сахар</b>", lines))
 
-    sleep_dates = [day for day in recorded_dates(sleep)
-                   if sleep[day.isoformat()].get("started") or sleep[day.isoformat()].get("wake_up")]
+    sleep_dates = recorded_dates(sleep)
     if sleep_dates:
         lines = []
+        total_periods = 0
         for day in sleep_dates:
-            info = sleep[day.isoformat()]
-            line = f"{day.strftime('%d')} — {info.get('started') or '--:--'} — {info.get('wake_up') or '--:--'}"
-            if info.get("duration"):
-                line += f" ({info['duration']})"
-            lines.append(line)
-        sections.append(section("😴 <b>Сон</b>", lines))
+            entries = sleep.get(day.isoformat(), [])
+            if not entries:
+                continue
+            for info in entries:
+                lines.append(f"<b>{day.strftime('%d.%m')}</b> — {format_sleep_entry(info)}")
+                total_periods += 1
+        if total_periods:
+            lines.append(f"Всего периодов сна: <b>{total_periods}</b>")
+            sections.append(section("😴 <b>Сон</b>", lines))
+
+    no_sleep_dates = sleep_repository.get_no_sleep_dates(user_id, first_day, last_day)
+    if no_sleep_dates:
+        lines = [f"{day.strftime('%d.%m')} — отмечено, что ночью не спал(а)" for day in no_sleep_dates]
+        sections.append(section("🌙 <b>Бессонные ночи</b>", lines))
 
     work_dates = [day for day in recorded_dates(work)
                   if work[day.isoformat()].get("started") or work[day.isoformat()].get("finished")]
@@ -921,26 +974,38 @@ def build_year_report(user_id, target_date):
         lines.append(f"Всего измерений за год: <b>{total}</b>")
         sections.append(section("🩸 <b>Сахар</b>", lines))
 
-    # Сон — только месяцы с начатыми снами.
+    # Сон — учитываем каждый период; среднюю длительность считаем только
+    # по завершённым записям, чтобы незавершённые не искажали среднее.
     sleep_month_counts = {}
     sleep_minutes = {}
+    sleep_completed_counts = {}
     for day in recorded_dates(sleep):
-        info = sleep[day.isoformat()]
-        if not (info.get("started") or info.get("wake_up")):
-            continue
-        sleep_month_counts[day.month] = sleep_month_counts.get(day.month, 0) + 1
-        minutes = duration_to_minutes(info.get("duration"))
-        if minutes is not None:
-            sleep_minutes[day.month] = sleep_minutes.get(day.month, 0) + minutes
+        for info in sleep.get(day.isoformat(), []):
+            sleep_month_counts[day.month] = sleep_month_counts.get(day.month, 0) + 1
+            minutes = duration_to_minutes(info.get("duration"))
+            if minutes is not None:
+                sleep_minutes[day.month] = sleep_minutes.get(day.month, 0) + minutes
+                sleep_completed_counts[day.month] = sleep_completed_counts.get(day.month, 0) + 1
     if sleep_month_counts:
         lines = []
         for month, count in sorted(sleep_month_counts.items()):
-            line = f"{MONTHS[month - 1]} — <b>{count}</b> ночей"
-            if sleep_minutes.get(month):
-                avg = sleep_minutes[month] // count
-                line += f", среднее {format_minutes(avg)}"
+            line = f"{MONTHS[month - 1]} — <b>{count}</b> периодов сна"
+            completed_count = sleep_completed_counts.get(month, 0)
+            if completed_count:
+                avg = sleep_minutes[month] // completed_count
+                line += f", среднее по завершённым: {format_minutes(avg)}"
             lines.append(line)
         sections.append(section("😴 <b>Сон</b>", lines))
+
+    no_sleep_dates = sleep_repository.get_no_sleep_dates(user_id, first_day, last_day)
+    no_sleep_month_counts = {}
+    for day in no_sleep_dates:
+        no_sleep_month_counts[day.month] = no_sleep_month_counts.get(day.month, 0) + 1
+    if no_sleep_month_counts:
+        lines = [f"{MONTHS[month - 1]} — <b>{count}</b> бессонных ночей"
+                 for month, count in sorted(no_sleep_month_counts.items())]
+        lines.append(f"Всего за год: <b>{len(no_sleep_dates)}</b>")
+        sections.append(section("🌙 <b>Бессонные ночи</b>", lines))
 
     # Работа — только месяцы с записями.
     work_month_counts = {}

@@ -121,7 +121,40 @@ def water_progress_bar(count, goal):
     )
 
 
-def execute(api, chat_id, user_id):
+
+def today_buttons(sleep_started=None, sleep_wake_up=None):
+    """Inline quick actions and navigation for the Today dashboard."""
+    if sleep_started and not sleep_wake_up:
+        sleep_action = {
+            "type": "callback",
+            "text": "🌅 Проснулся",
+            "payload": "sleep:wake",
+        }
+    else:
+        sleep_action = {
+            "type": "callback",
+            "text": "🌙 Лёг спать",
+            "payload": "sleep:start",
+        }
+
+    return [
+        [sleep_action],
+        [
+            {"type": "callback", "text": "✏️ Добавить или исправить сон", "payload": "sleep:edit"},
+        ],
+        [
+            {"type": "callback", "text": "🌙 Отметить бессонную ночь", "payload": "sleep:no_sleep"},
+        ],
+        [
+            {"type": "callback", "text": "😴 Все действия со сном", "payload": "sleep:open"},
+        ],
+        [
+            {"type": "callback", "text": "⬅️ Назад", "payload": "nav:back"},
+            {"type": "callback", "text": "🏠 Главное меню", "payload": "nav:menu"},
+        ],
+    ]
+
+def execute(api, chat_id, user_id, notice=None):
 
     habits_list = habits.get_habits(
         user_id
@@ -236,6 +269,8 @@ def execute(api, chat_id, user_id):
     text = (
         "☀️ <b>Сегодня</b>\n\n"
     )
+    if notice:
+        text += f"{notice}\n\n"
 
     # =================================================
     # ВОДА
@@ -510,13 +545,13 @@ def execute(api, chat_id, user_id):
 
         text += (
             "\n"
-            "☀️ пробуждение\n"
+            "Нажмите кнопку «Сон» ниже, чтобы отметить пробуждение.\n"
         )
 
     elif not sleep_started:
 
         text += (
-            "🌙 сон — начать\n"
+            "Нажмите кнопку «Сон» ниже, чтобы отметить начало сна.\n"
         )
 
     text += "\n"
@@ -638,7 +673,8 @@ def execute(api, chat_id, user_id):
 
         api.send_message(
             chat_id=chat_id,
-            text=text
+            text=text,
+            buttons=today_buttons(sleep_started, sleep_wake_up)
         )
 
         return
@@ -745,5 +781,6 @@ def execute(api, chat_id, user_id):
 
     api.send_message(
         chat_id=chat_id,
-        text=text
+        text=text,
+        buttons=today_buttons(sleep_started, sleep_wake_up)
     )
