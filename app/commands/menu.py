@@ -1,22 +1,53 @@
 def execute(api, chat_id, first_name):
+    """Отправляет главное меню LifeCheck с inline-кнопками MAX."""
 
     text = (
-        f"☀️ <b>Добро пожаловать, {first_name}!</b>\n\n"
-
-        "Добро пожаловать в <b>LifeCheck</b>.\n"
-        "Ваш личный помощник на каждый день.\n\n"
-
-        "━━━━━━━━━━━━━━\n\n"
-
-        "1. ☀️ Сегодня\n"
-        "2. 📋 Мой день\n"
-        "3. 📚 Привычки\n"
-        "4. ❤️ Здоровье\n"
-        "5. 📊 Статистика\n"
-        "6. ⚙️ Настройки"
+        f"☀️ <b>LifeCheck</b>\n"
+        f"Привет, {first_name}!\n\n"
+        "Выберите раздел:"
     )
 
-    api.send_message(
+    buttons = [
+        [
+            {
+                "type": "callback",
+                "text": "☀️ Сегодня",
+                "payload": "main:1"
+            },
+            {
+                "type": "callback",
+                "text": "📋 Мой день",
+                "payload": "main:2"
+            }
+        ],
+        [
+            {
+                "type": "callback",
+                "text": "📚 Привычки",
+                "payload": "main:3"
+            },
+            {
+                "type": "callback",
+                "text": "❤️ Здоровье",
+                "payload": "main:4"
+            }
+        ],
+        [
+            {
+                "type": "callback",
+                "text": "📊 Статистика",
+                "payload": "main:5"
+            },
+            {
+                "type": "callback",
+                "text": "⚙️ Настройки",
+                "payload": "main:6"
+            }
+        ]
+    ]
+
+    return api.send_message(
         chat_id=chat_id,
-        text=text
+        text=text,
+        buttons=buttons
     )

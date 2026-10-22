@@ -4,7 +4,9 @@ import urllib3
 from config.settings import BOT_TOKEN
 
 
-# Отключаем предупреждения о verify=False
+# Отключаем предупреждения о verify=False.
+# Настройку TLS пока сохраняем прежней, чтобы это изменение
+# не влияло на текущую работу бота.
 urllib3.disable_warnings(
     urllib3.exceptions.InsecureRequestWarning
 )
@@ -16,10 +18,10 @@ class MaxAPI:
 
     def __init__(self):
 
-        # Создаем отдельную HTTP-сессию
+        # Создаем отдельную HTTP-сессию.
         self.session = requests.Session()
 
-        # Не использовать системные HTTP_PROXY / HTTPS_PROXY
+        # Не использовать системные HTTP_PROXY / HTTPS_PROXY.
         self.session.trust_env = False
 
         self.headers = {
@@ -68,14 +70,15 @@ class MaxAPI:
         )
 
     # ==================================================
-    # Отправка сообщения
+    # Отправка сообщения, при необходимости — с inline-кнопками
     # ==================================================
 
     def send_message(
         self,
         user_id=None,
         chat_id=None,
-        text=""
+        text="",
+        buttons=None
     ):
 
         params = {}
@@ -91,11 +94,42 @@ class MaxAPI:
             "format": "html"
         }
 
+        # buttons ожидает массив рядов, где каждый ряд — массив кнопок.
+        # Каждая кнопка — словарь MAX API, например:
+        # {"type": "callback", "text": "Сегодня", "payload": "menu:today"}
+        if buttons:
+            body["attachments"] = [
+                {
+                    "type": "inline_keyboard",
+                    "payload": {
+                        "buttons": buttons
+                    }
+                }
+            ]
+
         return self.session.post(
             f"{self.BASE_URL}/messages",
             headers=self.headers,
             params=params,
             json=body,
+            verify=False,
+            timeout=15
+        )
+
+    # ==================================================
+    # Подтверждение нажатия inline-кнопки
+    # ==================================================
+
+    def answer_callback(self, callback_id):
+
+        if not callback_id:
+            return None
+
+        return self.session.post(
+            f"{self.BASE_URL}/answers",
+            headers=self.headers,
+            params={"callback_id": callback_id},
+            json={},
             verify=False,
             timeout=15
         )
